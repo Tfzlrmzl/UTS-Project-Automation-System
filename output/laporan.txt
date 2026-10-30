@@ -1,0 +1,7 @@
+=== LAPORAN RINGKASAN AUTOMATION SYSTEMS ===
+Tema: Online Book Catalog Organizer
+Keyword Filter: python
+Total Record Diproses: 0
+Rata-rata Harga Buku: £0.00
+
+Rincian Buku:
