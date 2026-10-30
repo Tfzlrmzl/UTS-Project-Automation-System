@@ -3,13 +3,11 @@
 Aplikasi otomatisasi berbasis Python untuk mengumpulkan, menyaring, mengorganisasi, dan membackup data katalog buku dari web secara otomatis melalui Command Line Interface (CLI). Tugas Ujian Tengah Semester (UTS) Mata Kuliah **Automation Systems**, Program Studi Teknik Informatika, Universitas Pelita Bangsa.
 
 ## Anggota Kelompok
-1. Haji Tafsil Mujair (Ketua / Anggota)
-2. Anggota 2
-3. Anggota 3
+1. 312310529 Muhammad Tafzil Rimzal
 
 ---
 
-## Fitur Utama & Integrasi Materi
+##Fitur Utama & Integrasi Materi
 - **Web Scraping (Chapter 13)**: Mengambil minimal 30 data buku dari `https://books.toscrape.com/` menggunakan `requests` dan `BeautifulSoup`.
 - **Regular Expressions (Chapter 9)**: Menggunakan `re` untuk ekstraksi nilai harga numerik dan penyaringan judul berdasarkan kata kunci (`--keyword`).
 - **File I/O (Chapter 10)**: Membaca dan menyimpan data mentah serta hasil terstruktur ke dalam format `.txt` dan `.csv`.
