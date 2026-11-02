@@ -1,201 +1,236 @@
 #!/usr/bin/env python3
-"""
-Aplikasi: Online Book Catalog Organizer & Scraper
-Mata Kuliah: Automation Systems
-Program Studi Teknik Informatika - Universitas Pelita Bangsa
-"""
+"""Online Book Catalog Organizer & Scraper."""
 
 import argparse
 import csv
 import re
 import sys
 import zipfile
+from decimal import Decimal
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
+
 import requests
 from bs4 import BeautifulSoup
 
 
+PROJECT_DIR = Path(__file__).resolve().parent
+DATA_DIR = PROJECT_DIR / "data"
+OUTPUT_DIR = PROJECT_DIR / "output"
+BACKUP_DIR = PROJECT_DIR / "backup"
+PRICE_PATTERN = re.compile(r"(\d+(?:\.\d{1,2})?)")
+CSV_FIELDS = ["title", "price_raw", "price_clean", "category", "url"]
+
+
+def positive_integer(value):
+    """Parse a positive integer for the --limit argument."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("limit harus berupa bilangan bulat") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("limit harus lebih besar dari 0")
+    return parsed
+
+
+def valid_url(value):
+    """Accept only absolute HTTP(S) URLs."""
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"URL tidak valid: {exc}") from exc
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise argparse.ArgumentTypeError("URL harus berupa alamat HTTP atau HTTPS yang valid")
+    return value
+
+
 def setup_directories():
-    """Membuat folder output, data, dan backup menggunakan pathlib."""
-    Path("data").mkdir(exist_ok=True)
-    Path("output").mkdir(exist_ok=True)
-    Path("backup").mkdir(exist_ok=True)
+    """Create project data, output, and backup directories."""
+    for directory in (DATA_DIR, OUTPUT_DIR, BACKUP_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def fetch_page(url):
+    """Fetch and decode a page, honoring the encoding detected from its content."""
+    response = requests.get(url, timeout=15)
+    response.raise_for_status()
+    response.encoding = response.apparent_encoding
+    return BeautifulSoup(response.text, "html.parser")
 
 
 def scrape_books(base_url, limit):
-    """Mengambil data buku dari situs web target dengan penanganan error yang andal."""
+    """Collect up to limit books, following pagination links when available."""
     print(f"[*] Memulai web scraping dari: {base_url} (Target: {limit} data)...")
     books = []
-    page = 1
-    
-    try:
-        response = requests.get(base_url, timeout=10)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f"[!] Kesalahan Koneksi: {e}")
-        return []
+    current_url = base_url
+    visited_urls = set()
 
-    soup = BeautifulSoup(response.text, 'html.parser')
-    items = soup.find_all('article', class_='product_pod')
+    while len(books) < limit and current_url and current_url not in visited_urls:
+        visited_urls.add(current_url)
+        soup = fetch_page(current_url)
 
-    while len(books) < limit and items:
-        for item in items:
+        for item in soup.select("article.product_pod"):
             if len(books) >= limit:
                 break
-            try:
-                # Judul Buku
-                title = item.h3.a['title']
-                
-                # Harga Buku
-                price_str = item.find('p', class_='price_color').text
-                
-                # Kategori & Tautan (Akan diambil dari halaman detail jika memungkinkan, atau simulasi link)
-                relative_url = item.h3.a['href']
-                detail_url = urljoin(base_url, relative_url)
-                
-                books.append({
-                    'title': title,
-                    'price': price_str,
-                    'url': detail_url
-                })
-            except AttributeError:
+
+            title_link = item.select_one("h3 a[title][href]")
+            price_element = item.select_one("p.price_color")
+            if title_link is None or price_element is None:
+                print("[!] Melewati entri buku dengan data judul/harga yang tidak lengkap.", file=sys.stderr)
                 continue
-        
-        # Cek halaman berikutnya jika kurang dari limit
-        if len(books) < limit:
-            next_btn = soup.find('li', class_='next')
-            if next_btn and next_btn.a:
-                next_page_url = urljoin(base_url, next_btn.a['href'])
-                try:
-                    res = requests.get(next_page_url, timeout=10)
-                    res.raise_for_status()
-                    soup = BeautifulSoup(res.text, 'html.parser')
-                    items = soup.find_all('article', class_='product_pod')
-                    base_url = next_page_url
-                except requests.exceptions.RequestException:
-                    break
-            else:
-                break
+
+            title = title_link.get("title", "").strip()
+            raw_price = price_element.get_text(strip=True)
+            if not title or PRICE_PATTERN.search(raw_price) is None:
+                print("[!] Melewati entri buku dengan judul atau harga yang tidak valid.", file=sys.stderr)
+                continue
+
+            books.append(
+                {
+                    "title": title,
+                    "price": raw_price,
+                    "url": urljoin(current_url, title_link["href"]),
+                }
+            )
+
+        next_link = soup.select_one("li.next a[href]")
+        current_url = urljoin(current_url, next_link["href"]) if next_link else None
 
     if not books:
-        print("[!] Peringatan: Tidak ada data yang berhasil dikumpulkan atau data kosong.")
+        raise ValueError("Tidak ada data buku valid yang berhasil dikumpulkan.")
+    if len(books) < limit:
+        print(f"[!] Hanya {len(books)} dari {limit} data yang tersedia.")
     else:
         print(f"[+] Berhasil mengumpulkan {len(books)} record buku.")
-    
     return books
 
 
 def process_and_filter_data(books, keyword):
-    """Memproses data, menerapkan Regular Expressions, dan menyaring berdasarkan keyword."""
-    raw_data_path = Path("data/raw_data.txt")
-    csv_output_path = Path("output/hasil_scraping.csv")
-    report_output_path = Path("output/laporan.txt")
-
-    # 1. Simpan data mentah menggunakan open() & pathlib (Reading and Writing Files)
-    with open(raw_data_path, "w", encoding="utf-8") as f:
-        for b in books:
-            f.write(f"Title: {b['title']} | Price: {b['price']} | URL: {b['url']}\n")
-    print(f"[+] Data mentah disimpan ke: {raw_data_path}")
-
-    processed_data = []
-    
-    # 2. Implementasi Regular Expressions (Minimal 2 pola berbeda)
-    # Pola 1: Ekstraksi angka harga dari string mata uang (misal: '£51.77' -> '51.77')
-    price_pattern = re.compile(r'([0-9]+\.[0-9]+)')
-    
-    # Pola 2: Validasi atau pencarian kata kunci khusus pada judul dengan re.IGNORECASE
+    """Normalize book data, apply an optional title filter, and write output files."""
+    raw_data_path = DATA_DIR / "raw_data.txt"
+    csv_output_path = OUTPUT_DIR / "hasil_scraping.csv"
+    report_output_path = OUTPUT_DIR / "laporan.txt"
     keyword_regex = re.compile(re.escape(keyword), re.IGNORECASE) if keyword else None
+    processed_data = []
 
-    for b in books:
-        # Validasi/Pembersihan harga dengan RegEx
-        price_match = price_pattern.search(b['price'])
-        clean_price = float(price_match.group(1)) if price_match else 0.0
-        
-        # Tentukan kategori harga otomatis
-        category = "Premium" if clean_price > 30.0 else "Standard"
-
-        # Filter keyword jika ada
-        if keyword_regex and not keyword_regex.search(b['title']):
+    for book in books:
+        match = PRICE_PATTERN.search(book["price"])
+        if match is None:
+            print(f"[!] Harga tidak valid; entri '{book['title']}' dilewati.", file=sys.stderr)
             continue
 
-        processed_data.append({
-            'title': b['title'],
-            'price_raw': b['price'],
-            'price_clean': clean_price,
-            'category': category,
-            'url': b['url']
-        })
+        price = Decimal(match.group(1))
+        if keyword_regex and not keyword_regex.search(book["title"]):
+            continue
 
-    # 3. Simpan ke CSV
-    with open(csv_output_path, "w", newline="", encoding="utf-8") as csvfile:
-        fieldnames = ['title', 'price_raw', 'price_clean', 'category', 'url']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        processed_data.append(
+            {
+                "title": book["title"],
+                "price_raw": book["price"],
+                "price_clean": price,
+                "category": "Premium" if price > Decimal("30.00") else "Standard",
+                "url": book["url"],
+            }
+        )
+
+    with raw_data_path.open("w", encoding="utf-8", newline="\n") as raw_file:
+        for book in books:
+            raw_file.write(
+                f"Title: {book['title']} | Price: {book['price']} | URL: {book['url']}\n"
+            )
+
+    with csv_output_path.open("w", encoding="utf-8-sig", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS, lineterminator="\n")
         writer.writeheader()
         for row in processed_data:
-            writer.writerow(row)
-    print(f"[+] Data terstruktur disimpan ke: {csv_output_path}")
+            csv_row = row.copy()
+            csv_row["price_clean"] = f"{row['price_clean']:.2f}"
+            writer.writerow(csv_row)
 
-    # 4. Buat Laporan Ringkasan (.txt)
     total_items = len(processed_data)
-    avg_price = sum(r['price_clean'] for r in processed_data) / total_items if total_items > 0 else 0.0
+    average_price = (
+        sum((row["price_clean"] for row in processed_data), Decimal("0")) / total_items
+        if total_items
+        else Decimal("0")
+    )
+    report_lines = [
+        "=== LAPORAN RINGKASAN AUTOMATION SYSTEMS ===",
+        "Tema: Online Book Catalog Organizer",
+        f"Keyword Filter: {keyword or 'Tidak ada'}",
+        f"Total Record Diproses: {total_items}",
+        f"Rata-rata Harga Buku: £{average_price:.2f}",
+        "",
+        "Rincian Buku:",
+    ]
+    report_lines.extend(
+        f"{index}. {row['title']} - {row['price_raw']} ({row['category']})"
+        for index, row in enumerate(processed_data, 1)
+    )
+    report_output_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
 
-    report_content = f"""=== LAPORAN RINGKASAN AUTOMATION SYSTEMS ===
-Tema: Online Book Catalog Organizer
-Keyword Filter: {keyword if keyword else 'Tidak ada'}
-Total Record Diproses: {total_items}
-Rata-rata Harga Buku: £{avg_price:.2f}
-
-Rincian Buku:
-"""
-    for idx, r in enumerate(processed_data, 1):
-        report_content += f"{idx}. {r['title']} - {r['price_raw']} ({r['category']})\n"
-
-    with open(report_output_path, "w", encoding="utf-8") as f:
-        f.write(report_content)
+    print(f"[+] Data mentah disimpan ke: {raw_data_path}")
+    print(f"[+] Data terstruktur disimpan ke: {csv_output_path}")
     print(f"[+] Laporan ringkasan disimpan ke: {report_output_path}")
-
+    if keyword and not processed_data:
+        print(f"[!] Tidak ada judul yang cocok dengan keyword '{keyword}'.")
     return processed_data
 
 
 def create_backup_zip():
-    """Membuat backup hasil pemrosesan dalam format .zip (Chapter 11)."""
-    backup_path = Path("backup/backup_data.zip")
-    with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for file_path in Path("output").rglob("*"):
+    """Create a ZIP archive containing processed output and raw input data."""
+    backup_path = BACKUP_DIR / "backup_data.zip"
+    with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file_path in sorted(OUTPUT_DIR.rglob("*")):
             if file_path.is_file():
-                zipf.write(file_path, file_path.relative_to("output"))
-        if Path("data/raw_data.txt").exists():
-            zipf.write(Path("data/raw_data.txt"), Path("data/raw_data.txt").name)
+                archive.write(file_path, file_path.relative_to(OUTPUT_DIR))
+        raw_data_path = DATA_DIR / "raw_data.txt"
+        if raw_data_path.is_file():
+            archive.write(raw_data_path, raw_data_path.name)
     print(f"[+] Backup berhasil dibuat di: {backup_path}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Automation Systems - Book Catalog Scraper & Organizer")
-    parser.add_argument("--url", default="https://books.toscrape.com/", help="URL target web scraping")
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="Automation Systems - Book Catalog Scraper & Organizer"
+    )
+    parser.add_argument(
+        "--url",
+        type=valid_url,
+        default="https://books.toscrape.com/",
+        help="URL target web scraping (HTTP atau HTTPS)",
+    )
     parser.add_argument("--keyword", default="", help="Kata kunci untuk menyaring judul buku")
-    parser.add_argument("--limit", type=int, default=30, help="Jumlah minimum record yang diambil (default: 30)")
-    parser.add_argument("--backup", action="store_true", help="Otomatis buat file ZIP backup hasil pemrosesan")
+    parser.add_argument(
+        "--limit",
+        type=positive_integer,
+        default=30,
+        help="Jumlah maksimum data yang diambil (default: 30)",
+    )
+    parser.add_argument(
+        "--backup",
+        action="store_true",
+        help="Buat file ZIP backup hasil pemrosesan",
+    )
+    return parser
 
-    args = parser.parse_args()
 
-    setup_directories()
-    
-    # Eksekusi Web Scraping
-    books = scrape_books(args.url, args.limit)
-    if not books:
-        print("[!] Proses dihentikan karena tidak ada data.")
-        sys.exit(1)
-
-    # Pemrosesan Data & RegEx
-    processed = process_and_filter_data(books, args.keyword)
-
-    # Backup ZIP jika argumen --backup diberikan
-    if args.backup:
-        create_backup_zip()
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        setup_directories()
+        books = scrape_books(args.url, args.limit)
+        process_and_filter_data(books, args.keyword.strip())
+        if args.backup:
+            create_backup_zip()
+    except (requests.RequestException, OSError, ValueError, zipfile.BadZipFile) as exc:
+        print(f"[!] Proses gagal: {exc}", file=sys.stderr)
+        return 1
 
     print("\n=== PROSES AUTOMATION SELESAI ===")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

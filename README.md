@@ -1,57 +1,48 @@
 # Online Book Catalog Organizer & Scraper
 
-Aplikasi otomatisasi berbasis Python untuk mengumpulkan, menyaring, mengorganisasi, dan membackup data katalog buku dari web secara otomatis melalui Command Line Interface (CLI). Tugas Ujian Tengah Semester (UTS) Mata Kuliah **Automation Systems**, Program Studi Teknik Informatika, Universitas Pelita Bangsa.
+Aplikasi CLI berbasis Python untuk mengambil, memfilter, dan mengorganisasi data katalog buku dari [Books to Scrape](https://books.toscrape.com/). Proyek ini dibuat untuk tugas Ujian Tengah Semester mata kuliah **Automation Systems**, Program Studi Teknik Informatika, Universitas Pelita Bangsa.
 
-## Anggota Kelompok
-1. 312310529 Muhammad Tafzil Rimzal
+## Fitur
 
----
+- Mengambil data buku dan mengikuti halaman berikutnya menggunakan `requests` dan `BeautifulSoup`.
+- Membersihkan harga dan memfilter judul berdasarkan kata kunci menggunakan regular expression.
+- Menyimpan data mentah, hasil CSV, dan laporan ringkasan.
+- Membuat arsip ZIP hasil pemrosesan dengan opsi `--backup`.
+- Memvalidasi argumen CLI dan melaporkan kegagalan proses.
 
-##Fitur Utama & Integrasi Materi
-- **Web Scraping (Chapter 13)**: Mengambil minimal 30 data buku dari `https://books.toscrape.com/` menggunakan `requests` dan `BeautifulSoup`.
-- **Regular Expressions (Chapter 9)**: Menggunakan `re` untuk ekstraksi nilai harga numerik dan penyaringan judul berdasarkan kata kunci (`--keyword`).
-- **File I/O (Chapter 10)**: Membaca dan menyimpan data mentah serta hasil terstruktur ke dalam format `.txt` dan `.csv`.
-- **Organisasi File & Backup (Chapter 11)**: Pembuatan direktori otomatis via `pathlib` dan kompresi hasil ke dalam arsip `.zip`.
-- **CLI & Error Handling (Chapter 12)**: Penggunaan `argparse` untuk argumen fleksibel serta penanganan kegagalan koneksi & data kosong.
+## Persyaratan
 
----
+- Python 3
+- Dependensi di `requirements.txt`
 
-## Cara Instalasi & Penggunaan
+## Instalasi dan penggunaan
 
-### 1. Instalasi Dependensi
-Pastikan Python telah terinstal, lalu jalankan perintah berikut di terminal:
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+python main.py --limit 30 --backup
 ```
 
-### 2. Cara Menjalankan Program
-Gunakan argumen CLI sesuai kebutuhan:
+Contoh dengan filter judul:
+
 ```bash
-python main.py --url https://books.toscrape.com/ --keyword python --limit 30 --backup
+python main.py --keyword "python" --limit 30
 ```
 
-### Penjelasan Argumen CLI:
-- `--url`: Menentukan URL target web scraping.
-- `--keyword`: Kata kunci penyaringan judul buku (opsional).
-- `--limit`: Jumlah minimum data yang diambil (default: 30).
-- `--backup`: Bendera (flag) untuk mengaktifkan pembuatan backup `.zip` otomatis.
+Argumen yang tersedia:
 
----
+| Argumen | Keterangan |
+| --- | --- |
+| `--url` | URL target HTTP/HTTPS; default `https://books.toscrape.com/`. |
+| `--keyword` | Filter judul buku (opsional, tidak membedakan huruf besar/kecil). |
+| `--limit` | Jumlah maksimum data yang diambil; default `30`. |
+| `--backup` | Membuat arsip ZIP setelah data diproses. |
 
-## Struktur Direktori Proyek
-```text
-UTS_Project_Kelompok_01/
-│
-├── main.py
-├── requirements.txt
-├── README.md
-├── data/
-│   └── raw_data.txt
-├── output/
-│   - hasil_scraping.csv
-│   - laporan.txt
-├── backup/
-│   └── backup_data.zip
-└── dokumentasi/
-    └── laporan_uts.pdf
-```
+## Hasil
+
+- `data/raw_data.txt` — data buku mentah.
+- `output/hasil_scraping.csv` — data buku terstruktur.
+- `output/laporan.txt` — ringkasan hasil pemrosesan.
+- `backup/backup_data.zip` — arsip hasil jika opsi `--backup` digunakan.
+- `dokumentasi/laporan_uts.pdf` — laporan tugas.
+
+File data dan arsip hasil dibuat saat program berjalan dan tidak disimpan di repository.

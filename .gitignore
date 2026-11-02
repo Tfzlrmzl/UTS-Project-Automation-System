@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+data/raw_data.txt
+output/*.csv
+output/*.txt
+backup/*.zip
